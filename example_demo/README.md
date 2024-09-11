@@ -722,3 +722,700 @@ Faber      | Presentation: state = done, pres_ex_id = 37e8f60b-a56f-4103-b717-bc
 Presentation: state = done, pres_ex_id = 37e8f60b-a56f-4103-b717-bce421446b18
 Faber      | Proof = true
 ```
+
+#### Execution Flow in Python
+
+The below Python code from `faber.py:728` runs when option 2 is entered for Sending a Proof Request to Alice.
+
+```python
+faber.py:728
+
+elif option == "2":
+    log_status("#20 Request proof of degree from alice")
+    if faber_agent.aip == 10:
+        proof_request_web_request = (
+            faber_agent.agent.generate_proof_request_web_request(
+                faber_agent.aip,
+                faber_agent.cred_type,
+                faber_agent.revocation,
+                exchange_tracing,
+            )
+        )
+        await faber_agent.agent.admin_POST(
+            "/present-proof/send-request", proof_request_web_request
+        )
+        pass
+
+    elif faber_agent.aip == 20:
+        if faber_agent.cred_type == CRED_FORMAT_INDY:
+            proof_request_web_request = (
+                faber_agent.agent.generate_proof_request_web_request(
+                    faber_agent.aip,
+                    faber_agent.cred_type,
+                    faber_agent.revocation,
+                    exchange_tracing,
+                )
+            )
+
+        elif faber_agent.cred_type == CRED_FORMAT_JSON_LD:
+            proof_request_web_request = (
+                faber_agent.agent.generate_proof_request_web_request(
+                    faber_agent.aip,
+                    faber_agent.cred_type,
+                    faber_agent.revocation,
+                    exchange_tracing,
+                )
+            )
+
+        elif faber_agent.cred_type == CRED_FORMAT_VC_DI:
+            proof_request_web_request = (
+                faber_agent.agent.generate_proof_request_web_request(
+                    faber_agent.aip,
+                    faber_agent.cred_type,
+                    faber_agent.revocation,
+                    exchange_tracing,
+                )
+            )
+
+        else:
+            raise Exception(
+                "Error invalid credential type:" + faber_agent.cred_type
+            )
+
+        await agent.admin_POST(
+            "/present-proof-2.0/send-request", proof_request_web_request
+        )
+
+    else:
+        raise Exception(f"Error invalid AIP level: {faber_agent.aip}")
+```
+
+As mentioned in the previous section, we know the AIP level is 20 (default). We also know the credential format is `CRED_FORMAT_INDY`. So, this specific section is executed:
+
+```python
+
+faber.py:745
+if faber_agent.cred_type == CRED_FORMAT_INDY:
+    proof_request_web_request = (
+        faber_agent.agent.generate_proof_request_web_request(
+            faber_agent.aip, # aries interop profile (rules/standards/protocols, we know it is v 2)
+            faber_agent.cred_type, # indy
+            faber_agent.revocation, # Specifies whether revocation support is needed for the proof (i.e., to verify if the credential has been revoked).
+            exchange_tracing, # This is the debugging boolean that is togglable with option T at the prompt
+        )
+    )
+
+```
+
+The function generate_proof_request_web_request is called to create a proof request in a format that can be sent to the holder (Alice) for verification. The proof request is later sent as a POST request to the Faber agent's admin API at the `/present-proof-2.0/send-request` endpoint, seen here:
+
+```python
+faber.py:780
+await agent.admin_POST(
+    "/present-proof-2.0/send-request", proof_request_web_request
+)
+```
+
+In routes.py, we have this route:
+
+```python
+
+routes.py:1423
+
+web.post(
+    "/present-proof-2.0/send-request",
+    present_proof_send_free_request,
+)
+```
+
+which says to handle that API POST request with this function:
+
+```python
+
+routes.py:961
+
+@docs(
+    tags=["present-proof v2.0"],
+    summary="Sends a free presentation request not bound to any proposal",
+)
+@request_schema(V20PresSendRequestRequestSchema())
+@response_schema(V20PresExRecordSchema(), 200, description="")
+@tenant_authentication
+async def present_proof_send_free_request(request: web.BaseRequest):
+    """Request handler for sending a presentation request free from any proposal.
+
+    Args:
+        request: aiohttp request object
+
+    Returns:
+        The presentation exchange details
+
+    """
+    r_time = get_timer()
+
+    context: AdminRequestContext = request["context"]
+    profile = context.profile
+    outbound_handler = request["outbound_message_router"]
+
+    body = await request.json()
+
+    connection_id = body.get("connection_id")
+    try:
+        async with profile.session() as session:
+            conn_record = await ConnRecord.retrieve_by_id(session, connection_id)
+    except StorageNotFoundError as err:
+        raise web.HTTPBadRequest(reason=err.roll_up) from err
+
+    if not conn_record.is_ready:
+        raise web.HTTPForbidden(reason=f"Connection {connection_id} not ready")
+
+    comment = body.get("comment")
+    pres_request_spec = body.get("presentation_request")
+    if pres_request_spec and V20PresFormat.Format.INDY.api in pres_request_spec:
+        await _add_nonce(pres_request_spec[V20PresFormat.Format.INDY.api])
+    pres_request_message = V20PresRequest(
+        comment=comment,
+        will_confirm=True,
+        **_formats_attach(pres_request_spec, PRES_20_REQUEST, "request_presentations"),
+    )
+    auto_verify = body.get(
+        "auto_verify", context.settings.get("debug.auto_verify_presentation")
+    )
+    auto_remove = body.get("auto_remove")
+    trace_msg = body.get("trace")
+    pres_request_message.assign_trace_decorator(
+        context.settings,
+        trace_msg,
+    )
+
+    pres_manager = V20PresManager(profile)
+    pres_ex_record = None
+    try:
+        pres_ex_record = await pres_manager.create_exchange_for_request(
+            connection_id=connection_id,
+            pres_request_message=pres_request_message,
+            auto_verify=auto_verify,
+            auto_remove=auto_remove,
+        )
+        result = pres_ex_record.serialize()
+    except (BaseModelError, StorageError) as err:
+        if pres_ex_record:
+            async with profile.session() as session:
+                await pres_ex_record.save_error_state(session, reason=err.roll_up)
+        # other party does not care about our false protocol start
+        raise web.HTTPBadRequest(reason=err.roll_up)
+
+    await outbound_handler(pres_request_message, connection_id=connection_id)
+
+    trace_event(
+        context.settings,
+        pres_request_message,
+        outcome="presentation_exchange_send_request.END",
+        perf_counter=r_time,
+    )
+
+    return web.json_response(result)
+
+```
+
+At a high level, the above function handles the sending of a proof request by doing the following:
+
+1. Start timer: The function starts a timer (r_time) to track the performance of the request.
+
+2. Extract context: The function retrieves the context (AdminRequestContext) and profile from the incoming request.
+
+3. Parse request body: The function extracts data from the request's JSON body, including connection_id, comment, and presentation_request.
+
+4. Validate connection: It checks if the connection (using connection_id) with Alice is ready by retrieving the connection record. If the connection isn’t ready, an error is raised.
+
+5. Generate presentation request:
+
+   - It creates a presentation request (pres_request_message) with the extracted information, including any comment, trace settings, and the request details (with support for the Indy format if specified).
+   - Nonces are added to the request for cryptographic proof, if needed.
+
+6. Create exchange: The presentation manager (V20PresManager) is used to create a presentation exchange record, enabling the exchange process with auto_verify and auto_remove settings.
+
+7. Error handling: If an error occurs during the exchange creation, it saves the error state and raises an appropriate HTTP error.
+
+8. Send request: The presentation request is sent to the connected agent, Alice, via the outbound message router.
+
+9. Log event and return response: The performance of the request is logged, and a JSON response containing the presentation exchange details is returned.
+
+This function initiates a presentation request that is not tied to any previous proposal, allowing the verifier to request proof from the holder directly.
+
+10. Now, Alice receives the request. The primary method that drives the generation of Alice's response this is the `AriesAgent.handle_present_proof_v2_0` method.
+
+```python
+
+agent_container:429
+
+async def handle_present_proof_v2_0(self, message):
+    state = message.get("state")
+    pres_ex_id = message["pres_ex_id"]
+    self.log(f"Presentation: state = {state}, pres_ex_id = {pres_ex_id}")
+
+    print(f"Presentation: state = {state}, pres_ex_id = {pres_ex_id}")
+
+    if state in ["request-received"]:
+        # prover role
+        log_status(
+            "#24 Query for credentials in the wallet that satisfy the proof request"
+        )
+        if not message.get("by_format"):
+            # this should not happen, something hinky when running in IDE...
+            self.log(f"No 'by_format' in message: {message}")
+        else:
+            pres_request_indy = (
+                message["by_format"].get("pres_request", {}).get("indy")
+            )
+            pres_request_dif = message["by_format"].get("pres_request", {}).get("dif")
+            request = {}
+
+            if not pres_request_dif and not pres_request_indy:
+                raise Exception("Invalid presentation request received")
+
+            if pres_request_indy:
+                # include self-attested attributes (not included in credentials)
+                creds_by_reft = {}
+                revealed = {}
+                self_attested = {}
+                predicates = {}
+
+                try:
+                    # select credentials to provide for the proof
+                    creds = await self.admin_GET(
+                        f"/present-proof-2.0/records/{pres_ex_id}/credentials"
+                    )
+                    # print(">>> creds:", creds)
+                    if creds:
+                        # select only indy credentials
+                        creds = [x for x in creds if "cred_info" in x]
+                        if "timestamp" in creds[0]["cred_info"]["attrs"]:
+                            sorted_creds = sorted(
+                                creds,
+                                key=lambda c: int(
+                                    c["cred_info"]["attrs"]["timestamp"]
+                                ),
+                                reverse=True,
+                            )
+                        else:
+                            sorted_creds = creds
+                        for row in sorted_creds:
+                            for referent in row["presentation_referents"]:
+                                if referent not in creds_by_reft:
+                                    creds_by_reft[referent] = row
+
+                    # submit the proof wit one unrevealed revealed attribute
+                    revealed_flag = False
+                    for referent in pres_request_indy["requested_attributes"]:
+                        if referent in creds_by_reft:
+                            revealed[referent] = {
+                                "cred_id": creds_by_reft[referent]["cred_info"][
+                                    "referent"
+                                ],
+                                "revealed": revealed_flag,
+                            }
+                            revealed_flag = True
+                        else:
+                            self_attested[referent] = "my self-attested value"
+
+                    for referent in pres_request_indy["requested_predicates"]:
+                        if referent in creds_by_reft:
+                            predicates[referent] = {
+                                "cred_id": creds_by_reft[referent]["cred_info"][
+                                    "referent"
+                                ]
+                            }
+
+                    log_status("#25 Generate the indy proof")
+                    indy_request = {
+                        "indy": {
+                            "requested_predicates": predicates,
+                            "requested_attributes": revealed,
+                            "self_attested_attributes": self_attested,
+                        }
+                    }
+                    request.update(indy_request)
+                except ClientError:
+                    pass
+
+            if pres_request_dif:
+                try:
+                    # select credentials to provide for the proof
+                    creds = await self.admin_GET(
+                        f"/present-proof-2.0/records/{pres_ex_id}/credentials"
+                    )
+
+                    if creds and 0 < len(creds):
+                        # select only dif credentials
+                        creds = [x for x in creds if "issuanceDate" in x]
+                        creds = sorted(
+                            creds,
+                            key=lambda c: c["issuanceDate"],
+                            reverse=True,
+                        )
+                        records = creds
+                    else:
+                        records = []
+
+                    log_status("#25 Generate the dif proof")
+                    dif_request = {
+                        "dif": {},
+                    }
+                    # specify the record id for each input_descriptor id:
+                    dif_request["dif"]["record_ids"] = {}
+                    for input_descriptor in pres_request_dif[
+                        "presentation_definition"
+                    ]["input_descriptors"]:
+                        input_descriptor_schema_uri = []
+                        for element in input_descriptor["schema"]:
+                            input_descriptor_schema_uri.append(element["uri"])
+
+                        for record in records:
+                            if self.check_input_descriptor_record_id(
+                                input_descriptor_schema_uri, record
+                            ):
+                                record_id = record["record_id"]
+                                dif_request["dif"]["record_ids"][
+                                    input_descriptor["id"]
+                                ] = [
+                                    record_id,
+                                ]
+                                break
+                    log_msg("presenting ld-presentation:", dif_request)
+                    request.update(dif_request)
+
+                    # NOTE that the holder/prover can also/or specify constraints by including the whole proof request
+                    # and constraining the presented credentials by adding filters, for example:
+                    #
+                    # request = {
+                    #     "dif": pres_request_dif,
+                    # }
+                    # request["dif"]["presentation_definition"]["input_descriptors"]["constraints"]["fields"].append(
+                    #      {
+                    #          "path": [
+                    #              "$.id"
+                    #          ],
+                    #          "purpose": "Specify the id of the credential to present",
+                    #          "filter": {
+                    #              "const": "https://credential.example.com/residents/1234567890"
+                    #          }
+                    #      }
+                    # )
+                    #
+                    # (NOTE the above assumes the credential contains an "id", which is an optional field)
+
+                except ClientError:
+                    pass
+
+            log_status("#26 Send the proof to X: " + json.dumps(request))
+            await self.admin_POST(
+                f"/present-proof-2.0/records/{pres_ex_id}/send-presentation",
+                request,
+            )
+    elif state == "presentation-received":
+        # verifier role
+        log_status("#27 Process the proof provided by X")
+        log_status("#28 Check if proof is valid")
+        proof = await self.admin_POST(
+            f"/present-proof-2.0/records/{pres_ex_id}/verify-presentation"
+        )
+        self.log("Proof =", proof["verified"])
+        self.last_proof_received = proof
+
+    elif state == "abandoned":
+        log_status("Presentation exchange abandoned")
+        self.log("Problem report message:", message.get("error_msg"))
+```
+
+This method in the `agent_container` module is used by both agents (this module serves, or contains logic, for both agents). You can see this from the inclusion of both the `request-received` state and the `presentation-received` state conditions. After Alice receives the presentation request (state=`request-received`):
+
+11. Alice agent logs the State and Presentation Exchange ID: The method starts by logging the current state of the presentation and the associated pres_ex_id (presentation exchange ID) to track the flow of the proof request.
+12. Alice agent handles `request-received` State (Alice acts as the holder/prover): when Alice receives a proof request from Faber, her agent queries Alice's digital wallet for credentials that can satisfy the proof request.
+13. It checks whether the request format is Indy or DIF. We know it's Indy, so we do not need to look at the DIF condition. For Indy proof requests:
+14. The method fetches credentials from the agent's wallet that match the request using the Alice agent's admin API endpoint `present-proof-2.0/records/{pres_ex_id}/credentials`.
+15. It selects the appropriate credentials (e.g., by timestamp) and determines whether to reveal or self-attest attributes (self-attested attributes are those the holder asserts without proof).
+16. The attributes are organized into revealed, self_attested, and predicates categories.
+17. A proof object is created, and the proof is submitted to the verifier using the /send-presentation endpoint.
+
+18. Now, Faber receives that presentation, and the state becomes `presentation-received`. 18. The faber agent, using that same method above from the `agent_container.py` module, handles the `presentation-received` State and acts as the verifier.
+
+19. Faber processes the proof and verifies it using the `/verify-presentation` endpoint of the Faber agent Admin API. While this is a POST request, there is no payload; it simply uses the ID of the presentation exchange, and the API endpoint uses that ID to handle the verification. We see this here:
+
+```python
+routes.py:1119
+
+web.post(
+    "/present-proof/records/{pres_ex_id}/verify-presentation",
+    presentation_exchange_verify_presentation,
+)
+....
+
+
+routes.py:930
+
+@docs(
+    tags=["present-proof v1.0"],
+    summary="Verify a received presentation",
+    deprecated=True,
+)
+@match_info_schema(V10PresExIdMatchInfoSchema())
+@response_schema(V10PresentationExchangeSchema(), description="")
+@tenant_authentication
+async def presentation_exchange_verify_presentation(request: web.BaseRequest):
+    """Request handler for verifying a presentation request.
+
+    Args:
+        request: aiohttp request object
+
+    Returns:
+        The presentation exchange details
+
+    """
+    r_time = get_timer()
+
+    context: AdminRequestContext = request["context"]
+    profile = context.profile
+    outbound_handler = request["outbound_message_router"]
+
+    presentation_exchange_id = request.match_info["pres_ex_id"]
+
+    pres_ex_record = None
+    async with profile.session() as session:
+        try:
+            pres_ex_record = await V10PresentationExchange.retrieve_by_id(
+                session, presentation_exchange_id
+            )
+        except StorageNotFoundError as err:
+            raise web.HTTPNotFound(reason=err.roll_up) from err
+
+        if pres_ex_record.state != (V10PresentationExchange.STATE_PRESENTATION_RECEIVED):
+            raise web.HTTPBadRequest(
+                reason=(
+                    f"Presentation exchange {presentation_exchange_id} "
+                    f"in {pres_ex_record.state} state "
+                    f"(must be {V10PresentationExchange.STATE_PRESENTATION_RECEIVED})"
+                )
+            )
+
+    try:
+        presentation_manager = PresentationManager(profile)
+        pres_ex_record = await presentation_manager.verify_presentation(pres_ex_record)
+        result = pres_ex_record.serialize()
+    except (BaseModelError, LedgerError, StorageError) as err:
+        if pres_ex_record:
+            async with profile.session() as session:
+                await pres_ex_record.save_error_state(session, reason=err.roll_up)
+        # other party cares that we cannot continue protocol
+        await report_problem(
+            err,
+            ProblemReportReason.ABANDONED.value,
+            web.HTTPBadRequest,
+            pres_ex_record,
+            outbound_handler,
+        )
+    except PresentationManagerError as err:
+        return web.HTTPBadRequest(reason=err.roll_up)
+
+    trace_event(
+        context.settings,
+        pres_ex_record,
+        outcome="presentation_exchange_verify.END",
+        perf_counter=r_time,
+    )
+
+    return web.json_response(result)
+
+```
+
+The key code from the above is the following line:
+
+```python
+pres_ex_record = await presentation_manager.verify_presentation(pres_ex_record)
+```
+
+Here is the definition:
+
+```python
+manager.py:396
+async def verify_presentation(
+        self,
+        presentation_exchange_record: V10PresentationExchange,
+        responder: Optional[BaseResponder] = None,
+    ):
+        """Verify a presentation.
+
+        Args:
+            presentation_exchange_record: presentation exchange record
+                with presentation request and presentation to verify
+            responder: responder to use
+
+        Returns:
+            presentation record, updated
+
+        """
+        indy_proof_request = presentation_exchange_record._presentation_request.ser
+        indy_proof = presentation_exchange_record._presentation.ser
+        indy_handler = IndyPresExchHandler(self._profile)
+        (
+            schemas,
+            cred_defs,
+            rev_reg_defs,
+            rev_reg_entries,
+        ) = await indy_handler.process_pres_identifiers(indy_proof["identifiers"])
+
+        verifier = self._profile.inject(IndyVerifier)
+        (verified_bool, verified_msgs) = await verifier.verify_presentation(
+            dict(
+                indy_proof_request
+            ),  # copy to avoid changing the proof req in the stored pres exch
+            indy_proof,
+            schemas,
+            cred_defs,
+            rev_reg_defs,
+            rev_reg_entries,
+        )
+        presentation_exchange_record.verified = json.dumps(verified_bool)
+        presentation_exchange_record.verified_msgs = list(set(verified_msgs))
+        presentation_exchange_record.state = V10PresentationExchange.STATE_VERIFIED
+
+        async with self._profile.session() as session:
+            await presentation_exchange_record.save(session, reason="verify presentation")
+
+        await self.send_presentation_ack(presentation_exchange_record, responder)
+        return presentation_exchange_record
+```
+
+This is the core function responsible for the verification of the credential presentation, centralized in the `PresentationManager` class. Here's an analysis:
+
+**Arguments:**
+
+- `presentation_exchange_record`: This is the record that holds the presentation request and the actual presentation from the holder (e.g., Alice).
+- responder: An optional responder (Alice) to send messages or acknowledgments during the process.
+
+20. Retrieve the Presentation Data: The Indy proof request and the actual Indy proof (presentation) are extracted from the `presentation_exchange_record`. (This is why it did not need to be passed as a payload in the POST request)
+
+21. The `IndyPresExchHandler` is used to process the presentation's identifiers, which reference schemas, credential definitions, revocation registries, etc. These are needed to verify the credentials. The result is a set of supporting data: `schemas`, `cred_defs` (credential definitions), `rev_reg_defs` (revocation registry definitions), and `rev_reg_entries` (revocation registry entries).
+22. The `IndyVerifier` component is injected and used to verify the proof against the proof request. It checks the validity of the presentation based on the schemas, credential definitions, and revocation data, ensuring that the claims made in the proof are accurate and cryptographically valid. The result is a boolean (verified_bool) indicating whether the proof is valid and a list of messages (verified_msgs) related to the verification.
+
+23. The verification result (verified_bool) is stored in the `presentation_exchange_record`. Any verification messages are added to the record. The state of the record is updated to STATE_VERIFIED.
+
+24. The updated presentation_exchange_record is saved to the database/session with the reason "verify presentation."
+
+25. If a responder is provided, an acknowledgment of the verification is sent to the holder (i.e., Alice). This happens via the same encrypted communication channel between Faber and Alice that has been used so far. Below is the definition of the acknowledgement method. We see that since the responder (Alice) is provided, this method also updates the presentation exchange state to done and deletes the record from the database/session.
+
+```python
+
+manager.py:443
+async def send_presentation_ack(
+        self,
+        presentation_exchange_record: V10PresentationExchange,
+        responder: Optional[BaseResponder] = None,
+    ):
+        """Send acknowledgement of presentation receipt.
+
+        Args:
+            presentation_exchange_record: presentation exchange record with thread id
+            responder: Responder to use
+
+        """
+        responder = responder or self._profile.inject_or(BaseResponder)
+
+        if not presentation_exchange_record.connection_id:
+            # Find associated oob record. If this presentation exchange is created
+            # without oob (aip1 style connectionless) we can't send a presentation ack
+            # because we don't have their service
+            try:
+                async with self._profile.session() as session:
+                    await OobRecord.retrieve_by_tag_filter(
+                        session,
+                        {"attach_thread_id": presentation_exchange_record.thread_id},
+                    )
+            except StorageNotFoundError:
+                # This can happen in AIP1 style connectionless exchange. ACA-PY only
+                # supported this for receiving a presentation
+                LOGGER.error(
+                    "Unable to send connectionless presentation ack without associated "
+                    "oob record. This can happen if proof request was sent without "
+                    "wrapping it in an out of band invitation (AIP1-style)."
+                )
+                return
+
+        if responder:
+            presentation_ack_message = PresentationAck(
+                verification_result=presentation_exchange_record.verified
+            )
+            presentation_ack_message._thread = {
+                "thid": presentation_exchange_record.thread_id
+            }
+            presentation_ack_message.assign_trace_decorator(
+                self._profile.settings, presentation_exchange_record.trace
+            )
+
+            await responder.send_reply(
+                presentation_ack_message,
+                # connection_id can be none in case of connectionless
+                connection_id=presentation_exchange_record.connection_id,
+            )
+
+            # all done: delete
+            if presentation_exchange_record.auto_remove:
+                async with self._profile.session() as session:
+                    await presentation_exchange_record.delete_record(session)
+        else:
+            LOGGER.warning(
+                "Configuration has no BaseResponder: cannot ack presentation on %s",
+                presentation_exchange_record.thread_id,
+            )
+```
+
+26. The updated presentation exchange record is returned, now containing the verification results.
+27. The method logs whether the proof was successfully verified (proof["verified"]), indicating whether the proof was valid or not.
+28. The proof verification result is stored in self.last_proof_received.
+
+29. Back on the Alice side, since we know Faber sent an acknowledgement of the presentation, we should also not forget the reception of that acknowledgement by Alice, handled by this method:
+
+```python
+
+manager.py:504
+async def receive_presentation_ack(
+        self, message: PresentationAck, connection_record: Optional[ConnRecord]
+    ):
+        """Receive a presentation ack, from message in context on manager creation.
+
+        Returns:
+            presentation exchange record, retrieved and updated
+
+        """
+        connection_id = connection_record.connection_id if connection_record else None
+
+        async with self._profile.session() as session:
+            (
+                presentation_exchange_record
+            ) = await V10PresentationExchange.retrieve_by_tag_filter(
+                session,
+                {"thread_id": message._thread_id},
+                {
+                    # connection_id can be null in connectionless
+                    "connection_id": connection_id,
+                    "role": V10PresentationExchange.ROLE_PROVER,
+                },
+            )
+            presentation_exchange_record.verified = message._verification_result
+            presentation_exchange_record.state = (
+                V10PresentationExchange.STATE_PRESENTATION_ACKED
+            )
+
+            await presentation_exchange_record.save(
+                session, reason="receive presentation ack"
+            )
+
+            # all done: delete
+            if presentation_exchange_record.auto_remove:
+                async with self._profile.session() as session:
+                    await presentation_exchange_record.delete_record(session)
+
+        return presentation_exchange_record
+```
+
+This method allows the Alice agent to update its own presentation exchange state to done and delete the record from its own database/session.
