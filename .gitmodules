@@ -1,6 +1,0 @@
-[submodule "von-network"]
-	path = von-network
-	url = https://github.com/bcgov/von-network
-[submodule "aries-cloudagent-python"]
-	path = aries-cloudagent-python
-	url = https://github.com/hyperledger/aries-cloudagent-python.git
