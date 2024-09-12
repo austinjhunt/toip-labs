@@ -1,6 +1,6 @@
-# The Alice/Faber Demo
+# Lab 1: The Alice/Faber Demo
 
-There are several demos available for ACA-Py mostly (but not only) aimed at developers learning how to deploy an instance of the agent and an ACA-Py controller to implement an application.
+Lab 1 involves running 3 terminal instances to demo and explore the interaction between two Aries agents in a Verifiable Credential (VC) ecosystem. **Hyperledger Aries** allows trusted online peer-to-peer interactions based on decentralized identities and verifiable credentials. One agent, Faber, (the Verifier) securely issues credentials over an encrypted channel to another, Alice (the Holder), who saves it in a wallet. Then Faber requests proof of identity from Alice who uses that saved credential to prove her identity over that encrypted channel. Faber consumes the proof response from Alice and then verifies the proof cryptographically.
 
 This folder contains the terminal output for the von-network, Faber, and Alice terminals mentioned in the [Alice/Faber Demo documentation](https://aca-py.org/latest/demo/#the-alicefaber-python-demo). The terminal output was saved for each terminal for the purpose of analyzing the execution flow.
 
