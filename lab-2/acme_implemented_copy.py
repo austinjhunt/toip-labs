@@ -1,3 +1,7 @@
+# COPY OF aries-cloudagent-python/demo/runners/acme.py WITH IMPLEMENTATION OF ISSUE CREDENTIALS AND PROOF REQUESTS
+# Austin Hunt
+# 2024-09-12
+
 import asyncio
 import logging
 import os
