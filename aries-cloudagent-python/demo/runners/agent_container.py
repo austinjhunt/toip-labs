@@ -432,7 +432,7 @@ class AriesAgent(DemoAgent):
     async def handle_present_proof_v2_0(self, message):
         state = message.get("state")
         pres_ex_id = message["pres_ex_id"]
-        self.log(f"handle_present_proof_v2_0: state = {state}, pres_ex_id = {pres_ex_id}, message = {message}")
+        self.log(f"handle_present_proof_v2_0: state = {state}, pres_ex_id = {pres_ex_id}")
 
         if state in ["request-received", "request-received-test-failure"]:
             # prover role
@@ -464,7 +464,6 @@ class AriesAgent(DemoAgent):
                         creds = await self.admin_GET(
                             f"/present-proof-2.0/records/{pres_ex_id}/credentials"
                         )
-                        print("handle_present_proof_v2_0 creds:", creds)
                         if creds:
                             # select only indy credentials
                             creds = [x for x in creds if "cred_info" in x]
