@@ -262,7 +262,6 @@ class V20PresManager:
             V20PresManagerError: If unable to create the presentation or no supported
                 formats are available.
         """
-        print(f'create_pres called with pres_ex_record: {pres_ex_record}')
 
         proof_request = pres_ex_record.pres_request
         input_formats = proof_request.formats
