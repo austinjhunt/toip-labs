@@ -337,7 +337,10 @@ class AriesAgent(DemoAgent):
         pass
 
     async def handle_present_proof(self, message):
+        self.log("Received presentation message:", message)
+
         state = message.get("state")
+
 
         presentation_exchange_id = message["presentation_exchange_id"]
         presentation_request = message["presentation_request"]

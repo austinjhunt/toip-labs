@@ -41,6 +41,7 @@ class V20PresExRecord(BaseExchangeRecord):
     STATE_PROPOSAL_SENT = "proposal-sent"
     STATE_PROPOSAL_RECEIVED = "proposal-received"
     STATE_REQUEST_SENT = "request-sent"
+    STATE_REQUEST_RECEIVED_TEST_FAILURE = "request-received-test-failure"
     STATE_REQUEST_RECEIVED = "request-received"
     STATE_PRESENTATION_SENT = "presentation-sent"
     STATE_PRESENTATION_RECEIVED = "presentation-received"
