@@ -1247,9 +1247,15 @@ async def present_proof_send_presentation(request: web.BaseRequest):
     if test_failure:
         # Corrupt the presentation message data
         print(f'TESTING FAILURE: Corrupting presentation message data')
-        pres_message.presentations_attach[0].data = AttachDecoratorData(
-            base64_="corrupted".encode('utf-8')
-        )
+        # decode current data - FIX THIS - corrupted string just fails
+        decoded = pres_message.presentations_attach[0].data.base64.decode('utf-8')
+        print(f'present_proof_send_presentation decoded data: {decoded}')
+        # MODIFY THE DATA HERE ONCE WE KNOW STRUCTURE
+
+        # DOING IT THIS WAY FAILS
+        # pres_message.presentations_attach[0].data = AttachDecoratorData(
+        #     base64_="corrupted".encode('utf-8')
+        # )
         print(f'pres_message.presentations_attach[0].data_base64 set to corrupted: {pres_message}')
     await outbound_handler(pres_message, connection_id=pres_ex_record.connection_id)
 
