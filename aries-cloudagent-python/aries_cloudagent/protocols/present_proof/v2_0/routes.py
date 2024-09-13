@@ -995,7 +995,6 @@ async def present_proof_send_free_request(request: web.BaseRequest):
 
     comment = body.get("comment")
     pres_request_spec = body.get("presentation_request")
-    print("pres_request_spec", pres_request_spec)
     if pres_request_spec and V20PresFormat.Format.INDY.api in pres_request_spec:
         await _add_nonce(pres_request_spec[V20PresFormat.Format.INDY.api])
     pres_request_message = V20PresRequest(
@@ -1030,7 +1029,6 @@ async def present_proof_send_free_request(request: web.BaseRequest):
         # other party does not care about our false protocol start
         raise web.HTTPBadRequest(reason=err.roll_up)
 
-    # Pushing to alice via the connection
     await outbound_handler(pres_request_message, connection_id=connection_id)
 
     trace_event(
