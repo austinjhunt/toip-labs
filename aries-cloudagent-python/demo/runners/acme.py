@@ -121,7 +121,7 @@ class AcmeAgent(AriesAgent):
             )
             self.log("Proof = ", proof["verified"])
 
-            if not proof["verified"]:
+            if not proof["verified"] or proof["verified"] == "false":
                 # immediately return if proof is not valid
                 self.log("#28.1 Proof is not valid. Not processing further.")
                 return
