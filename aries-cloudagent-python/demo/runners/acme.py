@@ -121,6 +121,11 @@ class AcmeAgent(AriesAgent):
             )
             self.log("Proof = ", proof["verified"])
 
+            if not proof["verified"]:
+                # immediately return if proof is not valid
+                self.log("#28.1 Proof is not valid. Not processing further.")
+                return
+
             # if presentation is a degree schema (proof of education),
             # check values received
             pres_req = message["by_format"]["pres_request"]["indy"]
@@ -225,7 +230,6 @@ async def request_proof_of_education(agent, test_failure=False):
     agent: AriesAgent object
 
     """
-    print(f"request_proof_of_education: agent: {agent}")
     print(f'request_proof_of_education: test_failure: {test_failure}')
 
     req_attrs = [

@@ -1,6 +1,7 @@
 """Admin routes for presentations."""
 
 import json
+import base64
 from typing import Mapping, Sequence, Tuple
 
 from aiohttp import web
@@ -1157,9 +1158,9 @@ async def present_proof_send_presentation(request: web.BaseRequest):
     outbound_handler = request["outbound_message_router"]
     pres_ex_id = request.match_info["pres_ex_id"]
     body = await request.json()
-    print(f'present_proof_send_presentation body: {body}')
     test_failure = "test_failure" in body
-    print(f'present_proof_send_presentation test_failure: {test_failure}')
+    if test_failure:
+        print(f'present_proof_send_presentation: TESTING FAILURE')
     supported_formats = ["dif", "indy"]
     if not any(x in body for x in supported_formats):
         raise web.HTTPBadRequest(
@@ -1217,8 +1218,6 @@ async def present_proof_send_presentation(request: web.BaseRequest):
             comment=comment,
         )
         result = pres_ex_record.serialize()
-        print(f'Presentation message: {pres_message}')
-        print(f'Presentation exchange record serialized: {result}')
     except (
         BaseModelError,
         IndyHolderError,
@@ -1248,15 +1247,24 @@ async def present_proof_send_presentation(request: web.BaseRequest):
         # Corrupt the presentation message data
         print(f'TESTING FAILURE: Corrupting presentation message data')
         # decode current data - FIX THIS - corrupted string just fails
-        decoded = pres_message.presentations_attach[0].data.base64.decode('utf-8')
-        print(f'present_proof_send_presentation decoded data: {decoded}')
-        # MODIFY THE DATA HERE ONCE WE KNOW STRUCTURE
+        b64_string = pres_message.presentations_attach[0].data.base64
 
-        # DOING IT THIS WAY FAILS
-        # pres_message.presentations_attach[0].data = AttachDecoratorData(
-        #     base64_="corrupted".encode('utf-8')
-        # )
-        print(f'pres_message.presentations_attach[0].data_base64 set to corrupted: {pres_message}')
+        # this a stringified JSON object in base64 format, can't directly call decode() on it yet
+        # structure of decoded is stored in lab2/expected-data.json for reference
+        decoded = base64.b64decode(b64_string).decode('utf-8')
+        # now we can decode the JSON
+        decoded = json.loads(decoded)
+
+        # increment the degree attribute to corrupt it
+        current_degree = decoded["proof"]["proofs"][0]["primary_proof"]["eq_proof"]["revealed_attrs"]["degree"]
+        # all claims in the creds are numeric strings
+        # they have to remain numeric strings
+        # to corrupt "successfully", cast degree numeric string to int, increment, then cast back to str
+        decoded["proof"]["proofs"][0]["primary_proof"]["eq_proof"]["revealed_attrs"]["degree"] = str(int(current_degree) + 1)
+        encoded_new_degree = base64.b64encode(json.dumps(decoded).encode('utf-8'))
+        pres_message.presentations_attach[0].data = AttachDecoratorData(
+            base64_=encoded_new_degree
+        )
     await outbound_handler(pres_message, connection_id=pres_ex_record.connection_id)
 
     trace_event(
