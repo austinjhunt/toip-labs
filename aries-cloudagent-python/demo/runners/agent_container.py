@@ -432,11 +432,9 @@ class AriesAgent(DemoAgent):
     async def handle_present_proof_v2_0(self, message):
         state = message.get("state")
         pres_ex_id = message["pres_ex_id"]
-        self.log(f"Presentation: state = {state}, pres_ex_id = {pres_ex_id}")
+        self.log(f"handle_present_proof_v2_0: state = {state}, pres_ex_id = {pres_ex_id}, message = {message}")
 
-        print(f"Presentation: state = {state}, pres_ex_id = {pres_ex_id}")
-
-        if state in ["request-received"]:
+        if state in ["request-received", "request-received-test-failure"]:
             # prover role
             log_status(
                 "#24 Query for credentials in the wallet that satisfy the proof request"
@@ -466,7 +464,7 @@ class AriesAgent(DemoAgent):
                         creds = await self.admin_GET(
                             f"/present-proof-2.0/records/{pres_ex_id}/credentials"
                         )
-                        # print(">>> creds:", creds)
+                        print("handle_present_proof_v2_0 creds:", creds)
                         if creds:
                             # select only indy credentials
                             creds = [x for x in creds if "cred_info" in x]
@@ -485,7 +483,7 @@ class AriesAgent(DemoAgent):
                                     if referent not in creds_by_reft:
                                         creds_by_reft[referent] = row
 
-                        # submit the proof wit one unrevealed revealed attribute
+                        # submit the proof wit one unrevealed attribute
                         revealed_flag = False
                         for referent in pres_request_indy["requested_attributes"]:
                             if referent in creds_by_reft:
@@ -587,11 +585,10 @@ class AriesAgent(DemoAgent):
 
                     except ClientError:
                         pass
-                # sample: {"indy": {"requested_predicates": {}, "requested_attributes": {"0_name_uuid": {"cred_id": "388a83f7-bc9e-4f7f-a10f-a9167a7faa55", "revealed": false}, "0_date_uuid": {"cred_id": "388a83f7-bc9e-4f7f-a10f-a9167a7faa55", "revealed": true}, "0_degree_uuid": {"cred_id": "388a83f7-bc9e-4f7f-a10f-a9167a7faa55", "revealed": true}}, "self_attested_attributes": {}}}
 
-                # modify the cred_id to a different value to simulate an invalid proof response
-                if "0_name_uuid" in request["indy"]["requested_attributes"]:
-                    request["indy"]["requested_attributes"]["0_name_uuid"]["cred_id"] = "invalid_cred_id"
+                if state == "request-received-test-failure":
+                    request.update({"test_failure": True})
+
 
                 log_status("#26 Send the proof to X: " + json.dumps(request))
                 await self.admin_POST(
@@ -1123,6 +1120,7 @@ class AgentContainer:
             raise Exception("Invalid credential type:" + self.cred_type)
 
     async def verify_proof(self, proof_request):
+        print("Verifying proof ...")
         await asyncio.sleep(1.0)
 
         # check if the requested credential matches out last received

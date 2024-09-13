@@ -23,7 +23,7 @@ from ....indy.models.proof import IndyPresSpecSchema
 from ....indy.models.proof_request import IndyProofRequestSchema
 from ....indy.util import generate_pr_nonce
 from ....ledger.error import LedgerError
-from ....messaging.decorators.attach_decorator import AttachDecorator
+from ....messaging.decorators.attach_decorator import AttachDecorator, AttachDecoratorData
 from ....messaging.models.base import BaseModelError
 from ....messaging.models.openapi import OpenAPISchema
 from ....messaging.models.paginated_query import PaginatedQuerySchema, get_limit_offset
@@ -1157,6 +1157,9 @@ async def present_proof_send_presentation(request: web.BaseRequest):
     outbound_handler = request["outbound_message_router"]
     pres_ex_id = request.match_info["pres_ex_id"]
     body = await request.json()
+    print(f'present_proof_send_presentation body: {body}')
+    test_failure = "test_failure" in body
+    print(f'present_proof_send_presentation test_failure: {test_failure}')
     supported_formats = ["dif", "indy"]
     if not any(x in body for x in supported_formats):
         raise web.HTTPBadRequest(
@@ -1175,7 +1178,7 @@ async def present_proof_send_presentation(request: web.BaseRequest):
     except StorageNotFoundError as err:
         raise web.HTTPNotFound(reason=err.roll_up) from err
 
-    if pres_ex_record.state != (V20PresExRecord.STATE_REQUEST_RECEIVED):
+    if pres_ex_record.state not in [V20PresExRecord.STATE_REQUEST_RECEIVED, V20PresExRecord.STATE_REQUEST_RECEIVED_TEST_FAILURE]:
         raise web.HTTPBadRequest(
             reason=(
                 f"Presentation exchange {pres_ex_id} "
@@ -1214,6 +1217,8 @@ async def present_proof_send_presentation(request: web.BaseRequest):
             comment=comment,
         )
         result = pres_ex_record.serialize()
+        print(f'Presentation message: {pres_message}')
+        print(f'Presentation exchange record serialized: {result}')
     except (
         BaseModelError,
         IndyHolderError,
@@ -1238,6 +1243,14 @@ async def present_proof_send_presentation(request: web.BaseRequest):
         context.settings,
         trace_msg,
     )
+
+    if test_failure:
+        # Corrupt the presentation message data
+        print(f'TESTING FAILURE: Corrupting presentation message data')
+        pres_message.presentations_attach[0].data = AttachDecoratorData(
+            base64_="corrupted".encode('utf-8')
+        )
+        print(f'pres_message.presentations_attach[0].data_base64 set to corrupted: {pres_message}')
     await outbound_handler(pres_message, connection_id=pres_ex_record.connection_id)
 
     trace_event(
