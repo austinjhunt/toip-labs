@@ -1,6 +1,7 @@
 """Admin routes for presentations."""
 
 import json
+import base64
 from typing import Mapping, Sequence, Tuple
 
 from aiohttp import web
@@ -23,7 +24,7 @@ from ....indy.models.proof import IndyPresSpecSchema
 from ....indy.models.proof_request import IndyProofRequestSchema
 from ....indy.util import generate_pr_nonce
 from ....ledger.error import LedgerError
-from ....messaging.decorators.attach_decorator import AttachDecorator
+from ....messaging.decorators.attach_decorator import AttachDecorator, AttachDecoratorData
 from ....messaging.models.base import BaseModelError
 from ....messaging.models.openapi import OpenAPISchema
 from ....messaging.models.paginated_query import PaginatedQuerySchema, get_limit_offset
@@ -1157,6 +1158,9 @@ async def present_proof_send_presentation(request: web.BaseRequest):
     outbound_handler = request["outbound_message_router"]
     pres_ex_id = request.match_info["pres_ex_id"]
     body = await request.json()
+    test_failure = "test_failure" in body
+    if test_failure:
+        print(f'present_proof_send_presentation: TESTING FAILURE')
     supported_formats = ["dif", "indy"]
     if not any(x in body for x in supported_formats):
         raise web.HTTPBadRequest(
@@ -1175,7 +1179,7 @@ async def present_proof_send_presentation(request: web.BaseRequest):
     except StorageNotFoundError as err:
         raise web.HTTPNotFound(reason=err.roll_up) from err
 
-    if pres_ex_record.state != (V20PresExRecord.STATE_REQUEST_RECEIVED):
+    if pres_ex_record.state not in [V20PresExRecord.STATE_REQUEST_RECEIVED, V20PresExRecord.STATE_REQUEST_RECEIVED_TEST_FAILURE]:
         raise web.HTTPBadRequest(
             reason=(
                 f"Presentation exchange {pres_ex_id} "
@@ -1238,6 +1242,29 @@ async def present_proof_send_presentation(request: web.BaseRequest):
         context.settings,
         trace_msg,
     )
+
+    if test_failure:
+        # Corrupt the presentation message data
+        print(f'TESTING FAILURE: Corrupting presentation message data')
+        # decode current data - FIX THIS - corrupted string just fails
+        b64_string = pres_message.presentations_attach[0].data.base64
+
+        # this a stringified JSON object in base64 format, can't directly call decode() on it yet
+        # structure of decoded is stored in lab2/expected-data.json for reference
+        decoded = base64.b64decode(b64_string).decode('utf-8')
+        # now we can decode the JSON
+        decoded = json.loads(decoded)
+
+        # increment the degree attribute to corrupt it
+        current_degree = decoded["proof"]["proofs"][0]["primary_proof"]["eq_proof"]["revealed_attrs"]["degree"]
+        # all claims in the creds are numeric strings
+        # they have to remain numeric strings
+        # to corrupt "successfully", cast degree numeric string to int, increment, then cast back to str
+        decoded["proof"]["proofs"][0]["primary_proof"]["eq_proof"]["revealed_attrs"]["degree"] = str(int(current_degree) + 1)
+        encoded_new_degree = base64.b64encode(json.dumps(decoded).encode('utf-8'))
+        pres_message.presentations_attach[0].data = AttachDecoratorData(
+            base64_=encoded_new_degree
+        )
     await outbound_handler(pres_message, connection_id=pres_ex_record.connection_id)
 
     trace_event(

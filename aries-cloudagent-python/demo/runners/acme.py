@@ -121,6 +121,11 @@ class AcmeAgent(AriesAgent):
             )
             self.log("Proof = ", proof["verified"])
 
+            if not proof["verified"] or proof["verified"] == "false":
+                # immediately return if proof is not valid
+                self.log("#28.1 Proof is not valid. Not processing further.")
+                return
+
             # if presentation is a degree schema (proof of education),
             # check values received
             pres_req = message["by_format"]["pres_request"]["indy"]
@@ -216,6 +221,44 @@ async def issue_credential_offer(agent, schema_attrs, schema_name, cred_def_id):
 ### ISSUE CREDENTIALS IMPLEMENTATION ###
 
 
+
+### PROOF REQUEST IMPLEMENTATION ###
+async def request_proof_of_education(agent, test_failure=False):
+    """
+    Function to send proof request to Alice for proof of education
+    Args:
+    agent: AriesAgent object
+
+    """
+    print(f'request_proof_of_education: test_failure: {test_failure}')
+
+    req_attrs = [
+        {"name": "name", "restrictions": [{"schema_name": "degree schema"}]},
+        {"name": "date", "restrictions": [{"schema_name": "degree schema"}]},
+        {"name": "degree", "restrictions": [{"schema_name": "degree schema"}]},
+    ]
+    req_preds = []
+    indy_proof_request = {
+        "name": "Proof of Education",
+        "version": "1.0",
+        "nonce": str(uuid4().int),
+        "requested_attributes": {
+            f"0_{req_attr['name']}_uuid": req_attr for req_attr in req_attrs
+        },
+        "requested_predicates": {},
+    }
+    proof_request_web_request = {
+        "connection_id": agent.connection_id,
+        "presentation_request": {"indy": indy_proof_request},
+    }
+    if test_failure:
+        proof_request_web_request.update({"comment": "test_failure"}) # tell Alice to fail so we can test handling the failed proof request
+
+    # this sends the request to our agent, which forwards it to Alice
+    # (based on the connection_id)
+    await agent.admin_POST("/present-proof-2.0/send-request", proof_request_web_request)
+### PROOF REQUEST IMPLEMENTATION ###
+
 async def main(args):
     acme_agent = await create_agent_with_args(args, ident="acme")
 
@@ -301,61 +344,15 @@ async def main(args):
 
             elif option == "2":
                 log_status("#20 Request proof of degree from alice")
-
                 ### PROOF REQUEST IMPLEMENTATION ###
-                req_attrs = [
-                    {"name": "name", "restrictions": [{"schema_name": "degree schema"}]},
-                    {"name": "date", "restrictions": [{"schema_name": "degree schema"}]},
-                    {"name": "degree", "restrictions": [{"schema_name": "degree schema"}]},
-                ]
-                req_preds = []
-                indy_proof_request = {
-                    "name": "Proof of Education",
-                    "version": "1.0",
-                    "nonce": str(uuid4().int),
-                    "requested_attributes": {
-                        f"0_{req_attr['name']}_uuid": req_attr for req_attr in req_attrs
-                    },
-                    "requested_predicates": {},
-                }
-                proof_request_web_request = {
-                    "connection_id": agent.connection_id,
-                    "presentation_request": {"indy": indy_proof_request},
-                }
-                # this sends the request to our agent, which forwards it to Alice
-                # (based on the connection_id)
-                await agent.admin_POST("/present-proof-2.0/send-request", proof_request_web_request)
+                await request_proof_of_education(agent)
                 ### PROOF REQUEST IMPLEMENTATION ###
 
             elif option == "2a":
-                log_status("#20 Request proof of degree from alice and handle presentation request failures (failed proof request)")
-
+                log_status("#20 Request proof of degree from alice AND test failure handling")
                 ### PROOF REQUEST IMPLEMENTATION ###
-                req_attrs = [
-                    {"name": "name", "restrictions": [{"schema_name": "degree schema"}]},
-                    {"name": "date", "restrictions": [{"schema_name": "degree schema"}]},
-                    {"name": "degree", "restrictions": [{"schema_name": "degree schema"}]},
-                ]
-                req_preds = []
-                indy_proof_request = {
-                    "name": "Proof of Education",
-                    "version": "1.0",
-                    "nonce": str(uuid4().int),
-                    "requested_attributes": {
-                        f"0_{req_attr['name']}_uuid": req_attr for req_attr in req_attrs
-                    },
-                    "requested_predicates": {},
-                }
-                proof_request_web_request = {
-                    "connection_id": agent.connection_id,
-                    "presentation_request": {"indy": indy_proof_request},
-                }
-                # this sends the request to our agent, which forwards it to Alice
-                # (based on the connection_id)
-                await agent.admin_POST("/present-proof-2.0/send-request", proof_request_web_request)
+                await request_proof_of_education(agent, test_failure=True)
                 ### PROOF REQUEST IMPLEMENTATION ###
-
-
 
             elif option == "3":
                 msg = await prompt("Enter message: ")

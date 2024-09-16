@@ -205,7 +205,13 @@ class V20PresManager:
             The presentation exchange record, updated
 
         """
-        pres_ex_record.state = V20PresExRecord.STATE_REQUEST_RECEIVED
+        pres_request = pres_ex_record._pres_request
+        comment = pres_request.de.comment
+        if comment and 'test_failure' in comment:
+            print(f'TEST FAILURE')
+            pres_ex_record.state = V20PresExRecord.STATE_REQUEST_RECEIVED_TEST_FAILURE
+        else:
+            pres_ex_record.state = V20PresExRecord.STATE_REQUEST_RECEIVED
         async with self._profile.session() as session:
             await pres_ex_record.save(session, reason="receive v2.0 presentation request")
 
@@ -263,7 +269,6 @@ class V20PresManager:
         pres_formats = []
         for format in input_formats:
             pres_exch_format = V20PresFormat.Format.get(format.format)
-
             if pres_exch_format:
                 if not request_data:
                     request_data_pres_exch = {}
